@@ -20,6 +20,19 @@ import { isSupabaseConfigured, supabase } from "./src/lib/supabase";
 
 type User = { id: string; email?: string };
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error) return error.message;
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [email, setEmail] = useState("");
@@ -120,11 +133,18 @@ export default function App() {
         );
       }
 
-      const { error: profileError } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from("profiles")
         .update({ sharing_enabled: true })
-        .eq("id", user.id);
-      if (profileError) throw profileError;
+        .eq("id", user.id)
+        .select("id")
+        .maybeSingle();
+      if (profileError) throw new Error(profileError.message);
+      if (!profile) {
+        throw new Error(
+          "Profil pengguna tidak ditemukan. Pastikan migrasi Supabase sudah dijalankan.",
+        );
+      }
 
       try {
         const alreadyRunning =
@@ -156,7 +176,7 @@ export default function App() {
           },
           { onConflict: "user_id" },
         );
-        if (uploadError) throw uploadError;
+        if (uploadError) throw new Error(uploadError.message);
       } catch (error) {
         let cleanupError: string | null = null;
         try {
@@ -179,8 +199,10 @@ export default function App() {
             .filter(Boolean)
             .join("; ");
         }
-        const originalMessage =
-          error instanceof Error ? error.message : "Gagal memulai berbagi lokasi.";
+        const originalMessage = getErrorMessage(
+          error,
+          "Gagal memulai berbagi lokasi.",
+        );
         throw new Error(
           cleanupError
             ? `${originalMessage} Pembersihan juga gagal: ${cleanupError}`
@@ -191,7 +213,10 @@ export default function App() {
       setMessage("Berbagi lokasi aktif. Anda dapat menghentikannya kapan saja.");
     } catch (error) {
       setMessage(
-        error instanceof Error ? error.message : "Gagal memulai berbagi lokasi.",
+        getErrorMessage(
+          error,
+          "Gagal memulai berbagi lokasi.",
+        ),
       );
     } finally {
       setBusy(false);
